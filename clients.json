@@ -1,0 +1,299 @@
+{
+    "count": 8,
+    "items": [
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "0",
+                    "balance": "344445",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19119171,
+                    "is_nonresident": false,
+                    "n_balance": "344445",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "1_Социология_Москва_2025",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "1_Социология_Москва_2025",
+                "id": 23490844,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client"
+                ],
+                "username": "2607650da2@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "19978.37",
+                    "balance": "19978.37",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19119173,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "2_Социология_Москва_2025",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "2_Социология_Москва_2025",
+                "id": 23490847,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client"
+                ],
+                "username": "2e032f8664@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "21569.18",
+                    "balance": "21569.18",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19119182,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "1_Социология_Москва_2025",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "1_Социология_Москва_2025",
+                "id": 23490865,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client",
+                    "or"
+                ],
+                "username": "6bfe10092b@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "0",
+                    "balance": "0",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19119191,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "2_Социология_Москва_2025",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "2_Социология_Москва_2025",
+                "id": 23490876,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client",
+                    "or"
+                ],
+                "username": "36cf6fff44@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "0",
+                    "balance": "0",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19607015,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "Информирование",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "Информирование",
+                "id": 24294861,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client",
+                    "or"
+                ],
+                "username": "afadfd3ffb@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "0",
+                    "balance": "0",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19634985,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "3_Социология_Москва_2025",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "3_Социология_Москва_2025",
+                "id": 24343061,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client"
+                ],
+                "username": "399c58bd04@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "0",
+                    "balance": "0",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 19653929,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "4_Социология_Москва_2025 (для тестов)",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "4_Социология_Москва_2025 (для тестов)",
+                "id": 24374227,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client",
+                    "or"
+                ],
+                "username": "e41192d1b2@agency_client"
+            }
+        },
+        {
+            "access_type": "full_access",
+            "status": "active",
+            "user": {
+                "account": {
+                    "a_balance": "0",
+                    "balance": "0",
+                    "currency": "RUB",
+                    "currency_balance_hold": "0",
+                    "flags": [
+                        "media"
+                    ],
+                    "id": 20936272,
+                    "is_nonresident": false,
+                    "n_balance": "0",
+                    "type": "client"
+                },
+                "additional_emails": [],
+                "additional_info": {
+                    "address": "",
+                    "client_info": "",
+                    "client_name": "4_Социология_Москва_2025 (для тестов)",
+                    "email": "",
+                    "name": "",
+                    "phone": ""
+                },
+                "client_username": "4_Социология_Москва_2025 (для тестов)",
+                "id": 26456350,
+                "status": "active",
+                "types": [
+                    "advert",
+                    "agency_client"
+                ],
+                "username": "bed4d783a9@agency_client"
+            }
+        }
+    ],
+    "limit": 20,
+    "offset": 0
+}

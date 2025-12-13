@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "name": "Активный",
+    "disabled": "False"
+  },
+  {
+    "id": 3,
+    "name": "Опубликован",
+    "disabled": "False"
+  },
+  {
+    "id": 4,
+    "name": "Завершенный",
+    "disabled": "False"
+  },
+  {
+    "id": 2,
+    "name": "Удаленный",
+    "disabled": "False"
+  }
+]
