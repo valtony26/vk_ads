@@ -122,7 +122,7 @@ class APIClient:
 
             print(
                 f"✅ Готово: {poll_name} — views: {combined['views_count']}, started: {combined['started_count']}, ended: {combined['ended_count']}")
-
+        print(combined)
         return result
 
     # ------------------------------

@@ -74,6 +74,15 @@ def get_tokens(owner_type, client_id):
 # --- Сохранение токенов в ClickHouse ---
 def save_tokens(owner_type, client_id, access_token, refresh_token, expires_at):
     client = db()
+    print("DEBUG save_tokens types:")
+    print(
+        "owner_type:", owner_type, type(owner_type),
+        "client_id:", client_id, type(client_id),
+        "access_token:", access_token, type(access_token),
+        "refresh_token:", refresh_token, type(refresh_token),
+        "expires_at:", expires_at, type(expires_at),
+    )
+
     client.execute("""
         INSERT INTO tokens (owner_type, client_id, access_token, refresh_token, expires_at, _version)
         VALUES
@@ -111,7 +120,13 @@ def refresh_agency_token(refresh_token):
     new_refresh = r.get("refresh_token", refresh_token)
     expires_at = int(time.time()) + r.get("expires_in", 86400)
 
-    save_tokens("agency", new_access, new_refresh, expires_at, AGENCY_ID)
+    save_tokens(
+        owner_type="agency",
+        client_id=AGENCY_ID,
+        access_token=new_access,
+        refresh_token=new_refresh,
+        expires_at=expires_at
+    )
 
     return new_access
 
@@ -175,15 +190,25 @@ def get_clients():
 
 
 def get_clients_tokens_dict():
-    clients_data = get_clients()
-
+    clients_data = get_clients()  # получаем всех клиентов агентства
     clients_tokens = {}
 
-    for client in clients_data["items"]:
+    for client in clients_data.get("items", []):
         client_id = str(client["user"]["account"]["id"])
-        access, _, _ = get_tokens("client", client_id)
+        access, refresh, expires_at = get_tokens("client", client_id)
+
+        # если токен отсутствует или истёк — получаем новый
+        if not access or (expires_at and expires_at < time.time()):
+            print(f"Получаем новый токен для клиента {client_id}")
+            access = get_new_client_token(client_id)
+
         if access:
-            clients_tokens[client_id] = access
+            clients_tokens[client_id] = {
+                "token": access,
+                "owner_type": "client"
+            }
+        else:
+            print(f"⚠️ Не удалось получить токен для клиента {client_id}")
 
     return clients_tokens
 
@@ -208,7 +233,7 @@ def get_client_without_tokens():
 
 def save_client_tokens(client_id, access, refresh, expires_in):
     expires_at = int(time.time()) + expires_in
-    save_tokens("client", access, refresh, expires_at, client_id)
+    save_tokens("client", client_id, access, refresh, expires_at)
 
 
 # ============================================================
@@ -276,6 +301,28 @@ def refresh_client_token(client_id):
     expires_at = int(time.time()) + expires_in
 
     # Сохраняем новые токены в ClickHouse
-    save_tokens("client", client_id, new_access, new_refresh, expires_at)
+    save_tokens(
+        owner_type="client",
+        client_id=AGENCY_ID,
+        access_token=new_access,
+        refresh_token=new_refresh,
+        expires_at=expires_at
+    )
     print(f"✅ Токен клиента {client_id} обновлён и сохранён")
     return new_access
+
+def get_all_tokens():
+    """
+    Возвращает словарь {client_id: access_token}
+    """
+    tokens = {}
+
+    clients = get_clients_tokens_dict()  # <-- твоя функция, откуда берутся client_id
+    for client_id in clients:
+        token = get_tokens(owner_type="client", client_id=client_id)
+        if token:
+            tokens[str(client_id)] = token
+
+    return tokens
+
+

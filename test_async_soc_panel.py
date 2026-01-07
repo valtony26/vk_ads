@@ -1,135 +1,104 @@
 import os
-import json
 import asyncio
 import aiohttp
 import requests
 from dotenv import load_dotenv
-from tqdm import tqdm
 
-load_dotenv(r'C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env')
+load_dotenv(r"C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env")
+
 
 class AsyncAPIClient:
-    # ------------------------------
-    # Настройки
-    # ------------------------------
-    BASE_URL = os.getenv('BASE_URL')
-    LOGIN = os.getenv('LOGIN')
-    PASSWORD = os.getenv('PASSWORD')
+    BASE_URL = os.getenv("BASE_URL")
+    LOGIN = os.getenv("LOGIN")
+    PASSWORD = os.getenv("PASSWORD")
 
     def __init__(self):
-        self.base_url = self.BASE_URL
-        self.login = self.LOGIN
-        self.password = self.PASSWORD
         self.session_token = None
+        self.semaphore = asyncio.Semaphore(5)
 
     # ------------------------------
-    # Синхронная авторизация
+    # СИНХРОННЫЙ ЛОГИН
     # ------------------------------
     def login_request(self):
-        url = f"{self.base_url}/api/login"
-        headers = {"Content-Type": "application/json"}
-        payload = {"login": self.login, "password": self.password}
+        url = f"{self.BASE_URL}/api/login"
+        payload = {"login": self.LOGIN, "password": self.PASSWORD}
 
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        if response.status_code != 200:
-            raise Exception(f"Ошибка авторизации: {response.status_code} {response.text}")
+        resp = requests.post(url, json=payload, timeout=15)
+        resp.raise_for_status()
 
-        data = response.json()
-        self.session_token = data.get("result", {}).get("session_token")
-        if not self.session_token:
-            raise Exception("❌ Не удалось получить session_token")
-
-        print("✅ Авторизация прошла успешно")
+        self.session_token = resp.json()["result"]["session_token"]
+        print("✅ Соцпанель: авторизация успешна")
 
     # ------------------------------
-    # Синхронный список опросов
+    # СИНХРОННЫЙ СПИСОК ОПРОСОВ
     # ------------------------------
     def get_poll_list(self):
-        url = f"{self.base_url}/api/poll/list"
-        headers = {"Content-Type": "application/json", "Authorization": self.session_token}
-        response = requests.post(url, headers=headers, timeout=10)
-        return response.json().get("result", [])
+        url = f"{self.BASE_URL}/api/poll/list"
+        headers = {"Authorization": self.session_token}
+        resp = requests.post(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        return resp.json().get("result", [])
 
     # ------------------------------
-    # Асинхронная статистика одного опроса
+    # АСИНХРОННАЯ СТАТИСТИКА ОПРОСА
     # ------------------------------
-    async def fetch_poll_stats(self, session, poll_id, domain_ids=None):
-        if domain_ids is None:
-            domain_ids = [1]
-
-        url = f"{self.base_url}/api/poll/stat"
-        headers = {"Content-Type": "application/json", "Authorization": self.session_token}
+    async def fetch_poll_stat(self, session, poll):
         payload = {
             "is_poll_complete": True,
             "is_poll_in_progress": True,
-            "domain_ids": domain_ids,
-            "id": poll_id
+            "domain_ids": [1],
+            "id": poll["id"]
         }
 
-        async with session.post(url, json=payload, headers=headers, timeout=10) as resp:
-            data = await resp.json()
-            result = data.get("result", {})
-            return {
-                "views_count": result.get("views_count"),
-                "started_count": result.get("started_count"),
-                "ended_count": result.get("ended_count")
-            }
+        headers = {
+            "Authorization": self.session_token,
+            "Content-Type": "application/json"
+        }
 
-    # ------------------------------
-    # Асинхронная обработка всех опросов
-    # ------------------------------
-    async def get_all_poll_stats_async(self, domain_ids=None):
-        polls = self.get_poll_list()
-        results = []
+        async with self.semaphore:
+            async with session.post(
+                f"{self.BASE_URL}/api/poll/stat",
+                json=payload,
+                headers=headers
+            ) as resp:
+                data = await resp.json()
+                r = data.get("result", {})
 
-        async with aiohttp.ClientSession() as session:
-            tasks = []
-
-            # Создаем задачи для всех опросов
-            for poll in polls:
-                poll_id = poll.get("id")
-                poll_name = poll.get("name")
-
-                # Статистика по формам
-                form_stats = {
-                    "poll_id": poll_id,
-                    "poll_name": poll_name,
+                return {
+                    "poll_id": poll["uuid"],
+                    "poll_name": poll.get("name", ""),
                     "collected_forms": sum(c.get("hits", 0) for c in poll.get("counters", [])),
                     "plan_forms": sum(c.get("quota", 0) for c in poll.get("counters", [])),
+                    "views_count": r.get("views_count", 0),
+                    "started_count": r.get("started_count", 0),
+                    "ended_count": r.get("ended_count", 0),
                     "platform_transitions": poll.get("platform_transitions", 0),
                     "greeting_conversion": poll.get("greeting_conversion", 0),
+                    "budget_vat": poll.get("budget_vat", 0),
+                    "days_running": poll.get("days_running", 0),
                 }
 
-                tasks.append((self.fetch_poll_stats(session, poll_id, domain_ids), form_stats))
+    # ------------------------------
+    # АСИНХРОННЫЙ СБОР ВСЕХ ОПРОСОВ
+    # ------------------------------
+    async def get_all_poll_stats_async(self):
+        polls = self.get_poll_list()
+        timeout = aiohttp.ClientTimeout(total=60)
 
-            # Запускаем все задачи параллельно
-            async_tasks = [t[0] for t in tasks]
-            responses = await asyncio.gather(*async_tasks, return_exceptions=True)
-
-            # Объединяем статистику
-            for idx, stats_result in enumerate(responses):
-                form_stats = tasks[idx][1]
-
-                # Если была ошибка
-                if isinstance(stats_result, Exception):
-                    stats_result = {"views_count": None, "started_count": None, "ended_count": None, "error": str(stats_result)}
-
-                combined = {**form_stats, **stats_result}
-                results.append(combined)
-
-        return results
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            tasks = [self.fetch_poll_stat(session, poll) for poll in polls]
+            return await asyncio.gather(*tasks)
 
 
-# ===================================================================
-#                         ПРИМЕР ИСПОЛЬЗОВАНИЯ
-# ===================================================================
-
-if __name__ == "__main__":
+# =====================================================================
+# СИНХРОННАЯ ФУНКЦИЯ ДЛЯ ИМПОРТА В ДРУГИЕ МОДУЛИ
+# =====================================================================
+def get_poll_status():
     client = AsyncAPIClient()
-    client.login_request()  # синхронный логин
+    client.login_request()
 
-    # Асинхронный сбор статистики
-    all_stats = asyncio.run(client.get_all_poll_stats_async())
-
-    for s in all_stats:
-        print(s)
+    try:
+        return asyncio.run(client.get_all_poll_stats_async())
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(client.get_all_poll_stats_async())

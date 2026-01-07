@@ -6,7 +6,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from token_manager import get_tokens, refresh_client_token  # импорт функции обновления токена
-from test_soc_panel_stat import get_poll_status
+from test_async_soc_panel import get_poll_status
 
 load_dotenv(r"C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env")
 BASE_URL = "https://ads.vk.com/api/v2"
@@ -93,60 +93,60 @@ def get_campaigns(client_id, access_token):
 
 # --- Сбор и запись статистики в ClickHouse с авто-обновлением токена ---
 def collect_vk_campaign_metrics(client_id, access_token):
-    """
-    Собирает статистику рекламных кампаний VK и возвращает список словарей.
-    Не выполняет вставку в ClickHouse.
-    """
     campaigns = get_campaigns(client_id, access_token)
 
-    # Если токен недействителен — пробуем обновить
     if campaigns == "unauthorized":
-        print(f"Токен клиента {client_id} недействителен, обновляем...")
-        new_access = refresh_client_token(client_id)
-        if not new_access:
-            print(f"Не удалось обновить токен клиента {client_id}")
-            return []
-        access_token = new_access
+        access_token = refresh_client_token(client_id)
         campaigns = get_campaigns(client_id, access_token)
         if campaigns == "unauthorized":
-            print(f"Новый токен клиента {client_id} тоже недействителен")
             return []
 
+    if not campaigns:
+        return []
+
     vk_data = []
+    id_to_name = {
+        str(c["id"]): c.get("name", f"Campaign {c['id']}")
+        for c in campaigns
+    }
 
-    for camp in campaigns or []:
-        campaign_id = str(camp["id"])
-        campaign_name = camp.get("name", f"Campaign {campaign_id}")
+    # 👇 батч по 5 кампаний (безопасно)
+    BATCH_SIZE = 5
+    STAT_DELAY = 1.1
 
-        # Запрашиваем статистику кампании
+    campaign_ids = list(id_to_name.keys())
+
+    for i in range(0, len(campaign_ids), BATCH_SIZE):
+        batch = campaign_ids[i:i + BATCH_SIZE]
+
+        time.sleep(STAT_DELAY)
+
         stats = vk_request(
             "/statistics/campaigns/summary.json",
             access_token,
-            params={"client_id": client_id, "ids": campaign_id}
+            params={
+                "client_id": client_id,
+                "ids": ",".join(batch)
+            }
         )
 
-        if not stats:
-            print(f"⚠️ Нет статистики для кампании {campaign_name}")
+        if not stats or "items" not in stats:
             continue
 
-        try:
-            base = stats["items"][0]["total"]["base"]
-        except (IndexError, KeyError):
-            continue
+        for item in stats["items"]:
+            cid = str(item.get("id"))
+            base = item.get("total", {}).get("base", {})
 
-        clicks = float(base.get("clicks", 0))
-        shows = float(base.get("shows", 0))
-        spent_without_vat = float(base.get("spent", 0))
-
-        vk_data.append({
-            "campaign_id": campaign_id,
-            "campaign_name": campaign_name,
-            "clicks": clicks,
-            "shows": shows,
-            "spent_without_vat": spent_without_vat
-        })
+            vk_data.append({
+                "campaign_id": cid,
+                "campaign_name": id_to_name.get(cid),
+                "clicks": float(base.get("clicks", 0)),
+                "shows": float(base.get("shows", 0)),
+                "spent_without_vat": float(base.get("spent", 0))
+            })
 
     return vk_data
+
 
 
 # --- Основная функция для всех клиентов ---
