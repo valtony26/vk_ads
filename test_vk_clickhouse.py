@@ -12,7 +12,6 @@ from token_manager import (
     get_agency_token,
     get_clients,
     refresh_client_token,
-    refresh_agency_token,
     get_tokens
 )
 from test_async_soc_panel import get_poll_status
@@ -68,6 +67,27 @@ def ensure_table_exists():
     print("✅ Таблица all_campaigns готова")
 
 
+def ensure_raw_table_exists():
+    db().execute("""
+        CREATE TABLE IF NOT EXISTS all_campaigns_raw (
+            client_id String,
+            campaign_id String,
+            campaign_name String,
+            banner_id String,
+            poll_uuid String,
+            date DateTime,
+
+            clicks Float64,
+            shows Float64,
+            spent_without_vat Float64
+        )
+        ENGINE = MergeTree
+        PARTITION BY toDate(date)
+        ORDER BY (client_id, campaign_id, banner_id, date)
+    """)
+    print("✅ Таблица all_campaigns_raw готова")
+
+
 # ===================================================================
 # RATE LIMITED VK REQUEST
 # ===================================================================
@@ -103,16 +123,12 @@ def vk_request(path, access_token, params=None, resource="DEFAULT", max_retries=
 
     if response.status_code == 429:
         if max_retries <= 0:
-            print(f"❌ 429 {resource}, retries исчерпаны")
             return None
-
         wait = max(int(response.headers.get("Retry-After", 10)), 10)
-        print(f"⏳ 429 {resource}, sleep {wait}s")
         time.sleep(wait)
         return vk_request(path, access_token, params, resource, max_retries - 1)
 
     if response.status_code != 200:
-        print(f"❌ VK API {resource} {response.status_code}: {response.text}")
         return None
 
     return response.json()
@@ -229,8 +245,6 @@ def collect_banners_uuid(client_id, access_token):
 
         parsed = urlparse(url)
         uuid = parse_qs(parsed.query).get("uuid", [None])[0]
-        if not uuid:
-            continue
 
         result.append({
             "campaign_id": campaign_id,
@@ -247,19 +261,22 @@ def collect_banners_uuid(client_id, access_token):
 
 def collect_all_campaigns(clients_tokens):
     ensure_table_exists()
+    ensure_raw_table_exists()
+
     ch = db()
 
     poll_data = get_poll_status()
     polls_by_id = {p["poll_id"]: p for p in poll_data}
 
-    rows = []
+    raw_rows = []
+    filtered_rows = []
 
     for client_id, info in clients_tokens.items():
         if info["owner_type"] != "client":
             continue
 
-        access_token = info["token"]
         print(f"\n▶ CLIENT {client_id}")
+        access_token = info["token"]
 
         campaigns = collect_vk_campaign_metrics(client_id, access_token)
         if not campaigns:
@@ -273,19 +290,35 @@ def collect_all_campaigns(clients_tokens):
         for camp in campaigns:
             campaign_id = camp["campaign_id"]
             banners = campaign_banner_map.get(campaign_id, [])
+
             for b in banners:
                 poll_uuid = b["poll_uuid"]
                 banner_id = b["banner_id"]
 
+                # RAW
+                raw_rows.append([
+                    client_id,
+                    campaign_id,
+                    camp["campaign_name"],
+                    banner_id,
+                    poll_uuid or "",
+                    datetime.now(),
+
+                    float(camp.get("clicks", 0)),
+                    float(camp.get("shows", 0)),
+                    float(camp.get("spent_without_vat", 0))
+                ])
+
+                # FILTERED (как раньше)
                 poll = polls_by_id.get(poll_uuid)
                 if not poll:
                     continue
 
-                rows.append([
+                filtered_rows.append([
                     client_id,
                     campaign_id,
                     camp["campaign_name"],
-                    poll_uuid,  # poll_uuid
+                    poll_uuid,
                     datetime.now(),
 
                     float(poll.get("collected_forms", 0)),
@@ -298,17 +331,16 @@ def collect_all_campaigns(clients_tokens):
                     float(poll.get("greeting_conversion", 0)),
                     float(poll.get("days_running", 0)),
 
-                    banner_id  # ← ID объявления
+                    banner_id
                 ])
 
-    cleaned_rows = [
-        [col if col is not None else "" for col in row]
-        for row in rows
-    ]
+    if raw_rows:
+        ch.execute("INSERT INTO all_campaigns_raw VALUES", raw_rows)
+        print(f"\n🟦 RAW вставлено строк: {len(raw_rows)}")
 
-    if cleaned_rows:
-        ch.execute("INSERT INTO all_campaigns VALUES", cleaned_rows)
-        print(f"\n✅ Вставлено строк: {len(cleaned_rows)}")
+    if filtered_rows:
+        ch.execute("INSERT INTO all_campaigns VALUES", filtered_rows)
+        print(f"🟩 FILTERED вставлено строк: {len(filtered_rows)}")
 
 
 # ===================================================================
