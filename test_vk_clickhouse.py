@@ -11,25 +11,20 @@ from dotenv import load_dotenv
 from token_manager import (
     get_agency_token,
     get_clients,
-    refresh_client_token,
-    get_tokens
+    get_tokens,
+    refresh_client_token
 )
 from test_async_soc_panel import get_poll_status
-
 
 # ===================================================================
 # ENV
 # ===================================================================
-
-load_dotenv(r"C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env")
-
+load_dotenv(r"C:\Users\golubovskiyav\Desktop\WORK\looger_for_vk_ads\vk_ads\.env")
 BASE_URL = "https://ads.vk.com/api/v2"
-
 
 # ===================================================================
 # CLICKHOUSE
 # ===================================================================
-
 def db():
     return Client(
         host=os.getenv("DB_HOST"),
@@ -37,7 +32,6 @@ def db():
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASS"),
     )
-
 
 def ensure_table_exists():
     db().execute("""
@@ -66,7 +60,6 @@ def ensure_table_exists():
     """)
     print("✅ Таблица all_campaigns готова")
 
-
 def ensure_raw_table_exists():
     db().execute("""
         CREATE TABLE IF NOT EXISTS all_campaigns_raw (
@@ -87,20 +80,16 @@ def ensure_raw_table_exists():
     """)
     print("✅ Таблица all_campaigns_raw готова")
 
-
 # ===================================================================
 # RATE LIMITED VK REQUEST
 # ===================================================================
-
 RATE_LIMITS = {
     "STATISTICS": 1.1,
     "CAMPAIGN": 0.35,
     "BANNERS": 1,
     "DEFAULT": 0.3
 }
-
 _last_call = defaultdict(float)
-
 
 def vk_request(path, access_token, params=None, resource="DEFAULT", max_retries=5):
     delay = RATE_LIMITS.get(resource, RATE_LIMITS["DEFAULT"])
@@ -133,11 +122,9 @@ def vk_request(path, access_token, params=None, resource="DEFAULT", max_retries=
 
     return response.json()
 
-
 # ===================================================================
 # CAMPAIGNS + STATISTICS
 # ===================================================================
-
 def get_campaigns(client_id, access_token):
     return vk_request(
         "/campaigns.json",
@@ -145,7 +132,6 @@ def get_campaigns(client_id, access_token):
         params={"client_id": client_id},
         resource="CAMPAIGN"
     )
-
 
 def collect_vk_campaign_metrics(client_id, access_token):
     campaigns = get_campaigns(client_id, access_token)
@@ -159,10 +145,7 @@ def collect_vk_campaign_metrics(client_id, access_token):
     if not campaigns or "items" not in campaigns:
         return []
 
-    id_to_name = {
-        str(c["id"]): c.get("name", f"Campaign {c['id']}")
-        for c in campaigns["items"]
-    }
+    id_to_name = {str(c["id"]): c.get("name", f"Campaign {c['id']}") for c in campaigns["items"]}
 
     vk_data = []
     campaign_ids = list(id_to_name.keys())
@@ -174,10 +157,7 @@ def collect_vk_campaign_metrics(client_id, access_token):
         stats = vk_request(
             "/statistics/campaigns/summary.json",
             access_token,
-            params={
-                "client_id": client_id,
-                "ids": ",".join(batch)
-            },
+            params={"client_id": client_id, "ids": ",".join(batch)},
             resource="STATISTICS"
         )
 
@@ -198,11 +178,9 @@ def collect_vk_campaign_metrics(client_id, access_token):
 
     return vk_data
 
-
 # ===================================================================
 # BANNERS UUID
 # ===================================================================
-
 def collect_banners_uuid(client_id, access_token):
     banners_data = vk_request(
         "/banners.json",
@@ -248,23 +226,42 @@ def collect_banners_uuid(client_id, access_token):
 
         result.append({
             "campaign_id": campaign_id,
-            "poll_uuid": uuid,
+            "poll_uuid": uuid or "",
             "banner_id": str(banner_id)
         })
 
     return result
 
+# ===================================================================
+# CLIENT TOKEN SAFE
+# ===================================================================
+def get_client_token(client_id):
+    """Возвращает рабочий токен клиента VK Ads."""
+    access, refresh, expires_at = get_tokens("client", client_id)
+
+    if not access:
+        raise Exception(f"Нет access_token для клиента {client_id}")
+
+    # Проверяем истечение токена
+    if expires_at is None or expires_at < time.time():
+        if refresh:
+            new_access = refresh_client_token(client_id)
+            if new_access:
+                access = new_access
+            else:
+                print(f"⚠️ Не удалось обновить токен для клиента {client_id}, используем старый")
+        else:
+            print(f"⚠️ Токен клиента {client_id} истёк, но refresh_token отсутствует")
+    return access
 
 # ===================================================================
 # MAIN LOGIC
 # ===================================================================
-
 def collect_all_campaigns(clients_tokens):
     ensure_table_exists()
     ensure_raw_table_exists()
 
     ch = db()
-
     poll_data = get_poll_status()
     polls_by_id = {p["poll_id"]: p for p in poll_data}
 
@@ -297,11 +294,11 @@ def collect_all_campaigns(clients_tokens):
 
                 # RAW
                 raw_rows.append([
-                    client_id,
-                    campaign_id,
-                    camp["campaign_name"],
-                    banner_id,
-                    poll_uuid or "",
+                    str(client_id),
+                    str(campaign_id),
+                    str(camp.get("campaign_name", "")),
+                    str(banner_id),
+                    str(poll_uuid),
                     datetime.now(),
 
                     float(camp.get("clicks", 0)),
@@ -309,16 +306,16 @@ def collect_all_campaigns(clients_tokens):
                     float(camp.get("spent_without_vat", 0))
                 ])
 
-                # FILTERED (как раньше)
+                # FILTERED
                 poll = polls_by_id.get(poll_uuid)
                 if not poll:
                     continue
 
                 filtered_rows.append([
-                    client_id,
-                    campaign_id,
-                    camp["campaign_name"],
-                    poll_uuid,
+                    str(client_id),
+                    str(campaign_id),
+                    str(camp.get("campaign_name", "")),
+                    str(poll_uuid),
                     datetime.now(),
 
                     float(poll.get("collected_forms", 0)),
@@ -331,8 +328,12 @@ def collect_all_campaigns(clients_tokens):
                     float(poll.get("greeting_conversion", 0)),
                     float(poll.get("days_running", 0)),
 
-                    banner_id
+                    str(banner_id)
                 ])
+
+    # Очистка None перед вставкой
+    raw_rows = [[col if col is not None else "" for col in row] for row in raw_rows]
+    filtered_rows = [[col if col is not None else "" for col in row] for row in filtered_rows]
 
     if raw_rows:
         ch.execute("INSERT INTO all_campaigns_raw VALUES", raw_rows)
@@ -342,27 +343,29 @@ def collect_all_campaigns(clients_tokens):
         ch.execute("INSERT INTO all_campaigns VALUES", filtered_rows)
         print(f"🟩 FILTERED вставлено строк: {len(filtered_rows)}")
 
-
 # ===================================================================
 # ENTRYPOINT
 # ===================================================================
-
 if __name__ == "__main__":
     print("🚀 Старт")
 
     clients_tokens = {}
+    agency_id = os.getenv("AGENCY_ID")
+    print("AGENCY_ID:", repr(agency_id))
 
-    clients_tokens[os.getenv("AGENCY_ID")] = {
+    # Агентский токен
+    clients_tokens[agency_id] = {
         "token": get_agency_token(),
         "owner_type": "agency"
     }
 
+    # Токены клиентов
     for client in get_clients().get("items", []):
         cid = str(client["user"]["account"]["id"])
         access, _, _ = get_tokens("client", cid)
         if access:
             clients_tokens[cid] = {
-                "token": access,
+                "token": get_client_token(cid),
                 "owner_type": "client"
             }
 

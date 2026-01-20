@@ -4,7 +4,7 @@ import aiohttp
 import requests
 from dotenv import load_dotenv
 
-load_dotenv(r"C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env")
+load_dotenv(r"C:\Users\golubovskiyav\Desktop\WORK\looger_for_vk_ads\vk_ads\.env")
 
 
 class AsyncAPIClient:
