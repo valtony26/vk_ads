@@ -12,14 +12,15 @@ from token_manager import (
     get_agency_token,
     get_clients,
     get_tokens,
-    refresh_client_token
+    refresh_client_token,
+    get_new_client_token
 )
 from test_async_soc_panel import get_poll_status
 
 # ===================================================================
 # ENV
 # ===================================================================
-load_dotenv(r"C:\Users\golubovskiyav\Desktop\WORK\looger_for_vk_ads\vk_ads\.env")
+load_dotenv(r"C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env")
 BASE_URL = "https://ads.vk.com/api/v2"
 
 # ===================================================================
@@ -33,35 +34,11 @@ def db():
         password=os.getenv("DB_PASS"),
     )
 
-def ensure_table_exists():
-    db().execute("""
-        CREATE TABLE IF NOT EXISTS all_campaigns (
-            client_id String,
-            campaign_id String,
-            campaign_name String,
-            poll_uuid String,
-            date DateTime,
+def ensure_tables():
+    ch = db()
 
-            collected_forms Float64,
-            clicks Float64,
-            shows Float64,
-            spent_without_vat Float64,
-            plan_forms Float64,
-            budget_vat Float64,
-            platform_transitions Float64,
-            greeting_conversion Float64,
-            days_running Float64,
-
-            banner_uuid String
-        )
-        ENGINE = MergeTree
-        PARTITION BY toDate(date)
-        ORDER BY (client_id, campaign_id, poll_uuid, date)
-    """)
-    print("✅ Таблица all_campaigns готова")
-
-def ensure_raw_table_exists():
-    db().execute("""
+    # 🟦 BANNERS
+    ch.execute("""
         CREATE TABLE IF NOT EXISTS all_campaigns_raw (
             client_id String,
             campaign_id String,
@@ -78,7 +55,31 @@ def ensure_raw_table_exists():
         PARTITION BY toDate(date)
         ORDER BY (client_id, campaign_id, banner_id, date)
     """)
-    print("✅ Таблица all_campaigns_raw готова")
+
+    # 🟩 CAMPAIGNS (AGG)
+    ch.execute("""
+        CREATE TABLE IF NOT EXISTS all_campaigns (
+            client_id String,
+            campaign_id String,
+            campaign_name String,
+            poll_uuid String,
+            date DateTime,
+
+            clicks Float64,
+            shows Float64,
+            spent_without_vat Float64,
+
+            budget_vat Float64,
+            collected_forms Float64,
+            plan_forms Float64,
+            views_count Float64,
+            greeting_conversion Float64,
+            days_running Float64
+        )
+        ENGINE = MergeTree
+        PARTITION BY toDate(date)
+        ORDER BY (client_id, campaign_id, poll_uuid, date)
+    """)
 
 # ===================================================================
 # RATE LIMITED VK REQUEST
@@ -102,7 +103,7 @@ def vk_request(path, access_token, params=None, resource="DEFAULT", max_retries=
         BASE_URL + path,
         headers={"Authorization": f"Bearer {access_token}"},
         params=params or {},
-        timeout=20
+        timeout=30
     )
 
     _last_call[resource] = time.time()
@@ -123,88 +124,64 @@ def vk_request(path, access_token, params=None, resource="DEFAULT", max_retries=
     return response.json()
 
 # ===================================================================
-# CAMPAIGNS + STATISTICS
+# CAMPAIGNS
 # ===================================================================
-def get_campaigns(client_id, access_token):
-    return vk_request(
+def collect_vk_campaigns(client_id, access_token):
+    response = vk_request(
         "/campaigns.json",
         access_token,
-        params={"client_id": client_id},
+        params={"client_id": client_id, "limit": 250},
         resource="CAMPAIGN"
     )
 
-def collect_vk_campaign_metrics(client_id, access_token):
-    campaigns = get_campaigns(client_id, access_token)
-
-    if campaigns == "unauthorized":
+    if response == "unauthorized":
         access_token = refresh_client_token(client_id)
-        campaigns = get_campaigns(client_id, access_token)
-        if campaigns == "unauthorized":
-            return []
-
-    if not campaigns or "items" not in campaigns:
-        return []
-
-    id_to_name = {str(c["id"]): c.get("name", f"Campaign {c['id']}") for c in campaigns["items"]}
-
-    vk_data = []
-    campaign_ids = list(id_to_name.keys())
-    BATCH_SIZE = 5
-
-    for i in range(0, len(campaign_ids), BATCH_SIZE):
-        batch = campaign_ids[i:i + BATCH_SIZE]
-
-        stats = vk_request(
-            "/statistics/campaigns/summary.json",
+        response = vk_request(
+            "/campaigns.json",
             access_token,
-            params={"client_id": client_id, "ids": ",".join(batch)},
-            resource="STATISTICS"
+            params={"client_id": client_id, "limit": 250},
+            resource="CAMPAIGN"
         )
 
-        if not stats or "items" not in stats:
-            continue
+    if not response or "items" not in response:
+        return []
 
-        for item in stats["items"]:
-            cid = str(item.get("id"))
-            base = item.get("total", {}).get("base", {})
+    campaigns = []
+    for c in response["items"]:
+        campaigns.append({
+            "campaign_id": str(c["id"]),
+            "campaign_name": c.get("name", "")
+        })
 
-            vk_data.append({
-                "campaign_id": cid,
-                "campaign_name": id_to_name.get(cid, ""),
-                "clicks": float(base.get("clicks", 0)),
-                "shows": float(base.get("shows", 0)),
-                "spent_without_vat": float(base.get("spent", 0))
-            })
-
-    return vk_data
+    return campaigns
 
 # ===================================================================
-# BANNERS UUID
+# BANNERS + UUID
 # ===================================================================
 def collect_banners_uuid(client_id, access_token):
-    banners_data = vk_request(
+    response = vk_request(
         "/banners.json",
         access_token,
         params={"client_id": client_id, "limit": 250},
         resource="BANNERS"
     )
 
-    if banners_data == "unauthorized":
+    if response == "unauthorized":
         access_token = refresh_client_token(client_id)
-        banners_data = vk_request(
+        response = vk_request(
             "/banners.json",
             access_token,
             params={"client_id": client_id, "limit": 250},
             resource="BANNERS"
         )
 
-    if not banners_data or "items" not in banners_data:
+    if not response or "items" not in response:
         return []
 
     result = []
 
-    for b in banners_data["items"]:
-        banner_id = b.get("id")
+    for b in response["items"]:
+        banner_id = str(b.get("id"))
         campaign_id = str(b.get("campaign_id"))
 
         banner_detail = vk_request(
@@ -222,51 +199,70 @@ def collect_banners_uuid(client_id, access_token):
             continue
 
         parsed = urlparse(url)
-        uuid = parse_qs(parsed.query).get("uuid", [None])[0]
+        poll_uuid = parse_qs(parsed.query).get("uuid", [None])[0]
+        if not poll_uuid:
+            continue
 
         result.append({
             "campaign_id": campaign_id,
-            "poll_uuid": uuid or "",
-            "banner_id": str(banner_id)
+            "banner_id": banner_id,
+            "poll_uuid": poll_uuid
         })
 
     return result
 
 # ===================================================================
-# CLIENT TOKEN SAFE
+# BANNERS STATISTICS
 # ===================================================================
-def get_client_token(client_id):
-    """Возвращает рабочий токен клиента VK Ads."""
-    access, refresh, expires_at = get_tokens("client", client_id)
+def collect_vk_banner_metrics(client_id, access_token, banner_ids):
+    if not banner_ids:
+        return {}
 
-    if not access:
-        raise Exception(f"Нет access_token для клиента {client_id}")
+    result = {}
+    BATCH_SIZE = 10
 
-    # Проверяем истечение токена
-    if expires_at is None or expires_at < time.time():
-        if refresh:
-            new_access = refresh_client_token(client_id)
-            if new_access:
-                access = new_access
-            else:
-                print(f"⚠️ Не удалось обновить токен для клиента {client_id}, используем старый")
-        else:
-            print(f"⚠️ Токен клиента {client_id} истёк, но refresh_token отсутствует")
-    return access
+    for i in range(0, len(banner_ids), BATCH_SIZE):
+        batch = banner_ids[i:i + BATCH_SIZE]
+
+        stats = vk_request(
+            "/statistics/banners/summary.json",
+            access_token,
+            params={
+                "client_id": client_id,
+                "ids": ",".join(batch)
+            },
+            resource="STATISTICS"
+        )
+
+        if not stats or "items" not in stats:
+            continue
+
+        for item in stats["items"]:
+            bid = str(item.get("id"))
+            base = item.get("total", {}).get("base", {})
+
+            result[bid] = {
+                "clicks": float(base.get("clicks", 0)),
+                "shows": float(base.get("shows", 0)),
+                "spent_without_vat": float(base.get("spent", 0))
+            }
+
+    return result
 
 # ===================================================================
 # MAIN LOGIC
 # ===================================================================
 def collect_all_campaigns(clients_tokens):
-    ensure_table_exists()
-    ensure_raw_table_exists()
-
+    ensure_tables()
     ch = db()
-    poll_data = get_poll_status()
-    polls_by_id = {p["poll_id"]: p for p in poll_data}
+
+    polls = {p["poll_uuid"]: p for p in get_poll_status()}
+    print("SOC PANEL POLLS:", len(polls))
 
     raw_rows = []
-    filtered_rows = []
+    campaign_rows = []
+
+    now = datetime.now()
 
     for client_id, info in clients_tokens.items():
         if info["owner_type"] != "client":
@@ -275,99 +271,146 @@ def collect_all_campaigns(clients_tokens):
         print(f"\n▶ CLIENT {client_id}")
         access_token = info["token"]
 
-        campaigns = collect_vk_campaign_metrics(client_id, access_token)
+        campaigns = collect_vk_campaigns(client_id, access_token)
         if not campaigns:
             continue
 
-        banner_uuids = collect_banners_uuid(client_id, access_token)
-        campaign_banner_map = defaultdict(list)
-        for b in banner_uuids:
-            campaign_banner_map[b["campaign_id"]].append(b)
+        campaigns_map = {c["campaign_id"]: c for c in campaigns}
 
-        for camp in campaigns:
-            campaign_id = camp["campaign_id"]
-            banners = campaign_banner_map.get(campaign_id, [])
+        banners = collect_banners_uuid(client_id, access_token)
+        if not banners:
+            continue
 
-            for b in banners:
-                poll_uuid = b["poll_uuid"]
-                banner_id = b["banner_id"]
+        banner_ids = [b["banner_id"] for b in banners]
 
-                # RAW
-                raw_rows.append([
-                    str(client_id),
-                    str(campaign_id),
-                    str(camp.get("campaign_name", "")),
-                    str(banner_id),
-                    str(poll_uuid),
-                    datetime.now(),
+        banner_stats = collect_vk_banner_metrics(
+            client_id,
+            access_token,
+            banner_ids
+        )
 
-                    float(camp.get("clicks", 0)),
-                    float(camp.get("shows", 0)),
-                    float(camp.get("spent_without_vat", 0))
-                ])
+        campaign_agg = {}
 
-                # FILTERED
-                poll = polls_by_id.get(poll_uuid)
-                if not poll:
-                    continue
+        for b in banners:
+            banner_id = b["banner_id"]
+            campaign_id = b["campaign_id"]
+            poll_uuid = b["poll_uuid"]
 
-                filtered_rows.append([
-                    str(client_id),
-                    str(campaign_id),
-                    str(camp.get("campaign_name", "")),
-                    str(poll_uuid),
-                    datetime.now(),
+            camp = campaigns_map.get(campaign_id)
+            if not camp:
+                continue
 
-                    float(poll.get("collected_forms", 0)),
-                    float(camp.get("clicks", 0)),
-                    float(camp.get("shows", 0)),
-                    float(camp.get("spent_without_vat", 0)),
-                    float(poll.get("plan_forms", 0)),
-                    float(poll.get("budget_vat", 0)),
-                    float(poll.get("platform_transitions", 0)),
-                    float(poll.get("greeting_conversion", 0)),
-                    float(poll.get("days_running", 0)),
+            stats = banner_stats.get(banner_id, {})
+            poll = polls.get(poll_uuid, {})
 
-                    str(banner_id)
-                ])
+            # 🟦 RAW (BANNERS)
+            raw_rows.append([
+                str(client_id),
+                str(campaign_id),
+                camp.get("campaign_name", ""),
+                str(banner_id),
+                str(poll_uuid),
+                now,
 
-    # Очистка None перед вставкой
-    raw_rows = [[col if col is not None else "" for col in row] for row in raw_rows]
-    filtered_rows = [[col if col is not None else "" for col in row] for row in filtered_rows]
+                float(stats.get("clicks", 0)),
+                float(stats.get("shows", 0)),
+                float(stats.get("spent_without_vat", 0))
+            ])
 
+            # 🟩 AGG KEY
+            key = (client_id, campaign_id, poll_uuid)
+
+            if key not in campaign_agg:
+                campaign_agg[key] = {
+                    "client_id": str(client_id),
+                    "campaign_id": str(campaign_id),
+                    "campaign_name": camp.get("campaign_name", ""),
+                    "poll_uuid": str(poll_uuid),
+                    "date": now,
+
+                    "clicks": 0.0,
+                    "shows": 0.0,
+                    "spent": 0.0,
+
+                    "budget_vat": float(poll.get("budget_vat_poll", 0)),
+                    "collected_forms": float(poll.get("collected_forms", 0)),
+                    "plan_forms": float(poll.get("plan_forms", 0)),
+                    "transition": float(poll.get("views_count", 0)),
+                    "greeting_conversion": float(poll.get("greeting_conversion", 0)),
+                    "days_running": float(poll.get("days_running", 0)),
+                }
+
+            campaign_agg[key]["clicks"] += float(stats.get("clicks", 0))
+            campaign_agg[key]["shows"] += float(stats.get("shows", 0))
+            campaign_agg[key]["spent"] += float(stats.get("spent_without_vat", 0))
+
+        # 🟩 FORM CAMPAIGN ROWS
+        for v in campaign_agg.values():
+            campaign_rows.append([
+                v["client_id"],
+                v["campaign_id"],
+                v["campaign_name"],
+                v["poll_uuid"],
+                v["date"],
+
+                v["clicks"],
+                v["shows"],
+                v["spent"],
+
+                v["budget_vat"],
+                v["collected_forms"],
+                v["plan_forms"],
+                v["transition"],
+                v["greeting_conversion"],
+                v["days_running"],
+            ])
+
+    # ===================================================================
+    # INSERT
+    # ===================================================================
     if raw_rows:
         ch.execute("INSERT INTO all_campaigns_raw VALUES", raw_rows)
-        print(f"\n🟦 RAW вставлено строк: {len(raw_rows)}")
+        print(f"🟦 RAW inserted: {len(raw_rows)}")
 
-    if filtered_rows:
-        ch.execute("INSERT INTO all_campaigns VALUES", filtered_rows)
-        print(f"🟩 FILTERED вставлено строк: {len(filtered_rows)}")
+    if campaign_rows:
+        ch.execute("INSERT INTO all_campaigns VALUES", campaign_rows)
+        print(f"🟩 CAMPAIGNS inserted: {len(campaign_rows)}")
 
 # ===================================================================
 # ENTRYPOINT
 # ===================================================================
 if __name__ == "__main__":
-    print("🚀 Старт")
+    print("🚀 START")
 
     clients_tokens = {}
     agency_id = os.getenv("AGENCY_ID")
-    print("AGENCY_ID:", repr(agency_id))
 
-    # Агентский токен
+    agency_token = get_agency_token()
+
     clients_tokens[agency_id] = {
-        "token": get_agency_token(),
+        "token": agency_token,
         "owner_type": "agency"
     }
 
-    # Токены клиентов
-    for client in get_clients().get("items", []):
+    clients_data = get_clients()
+
+    for client in clients_data.get("items", []):
         cid = str(client["user"]["account"]["id"])
-        access, _, _ = get_tokens("client", cid)
+
+        access, refresh, expires_at = get_tokens("client", cid)
+
+        if not access or (expires_at and expires_at < time.time()):
+            if refresh:
+                access = refresh_client_token(cid)
+            else:
+                access = get_new_client_token(cid)
+
         if access:
             clients_tokens[cid] = {
-                "token": get_client_token(cid),
+                "token": access,
                 "owner_type": "client"
             }
 
     collect_all_campaigns(clients_tokens)
-    print("🏁 Готово")
+
+    print("🏁 DONE")

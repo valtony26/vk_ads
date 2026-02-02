@@ -27,7 +27,7 @@
     <data-source source="LOCAL" name="test_parse@localhost" uuid="632b85b3-0ead-413b-acc3-e5f2310fea3b">
       <driver-ref>clickhouse</driver-ref>
       <synchronize>true</synchronize>
-      <jdbc-driver>ru.yandex.clickhouse.ClickHouseDriver</jdbc-driver>
+      <jdbc-driver>com.clickhouse.jdbc.ClickHouseDriver</jdbc-driver>
       <jdbc-url>jdbc:clickhouse://localhost:8123/test_parse</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>

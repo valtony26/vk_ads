@@ -4,7 +4,7 @@ import requests
 import os
 from dotenv import load_dotenv
 
-load_dotenv(r'C:\Users\golubovskiyav\Desktop\WORK\looger_for_vk_ads\vk_ads\.env')
+load_dotenv(r'C:\Users\tochi\Desktop\work_dialog\looger_for_vkads\.env')
 
 BASE_URL = "https://ads.vk.com/api/v2"
 
@@ -50,7 +50,7 @@ def init_db():
         client.execute(f"""
             INSERT INTO tokens 
             (client_id, owner_type, access_token, refresh_token, expires_at, _version)
-            VALUES ('agency', '{AGENCY_ID}', '', '', 0, {int(time.time())})
+            VALUES ('{AGENCY_ID}','agency',  '', '', 0, {int(time.time())})
         """)
 
 
@@ -123,6 +123,9 @@ def save_tokens(owner_type, client_id, access_token, refresh_token, expires_at):
 # ============================================================
 
 def refresh_agency_token(refresh_token):
+    """
+    Обновляет токен агентства по refresh_token и сохраняет его в ClickHouse.
+    """
     url = f"{BASE_URL}/oauth2/token.json"
 
     data = {
@@ -142,6 +145,7 @@ def refresh_agency_token(refresh_token):
     new_refresh = r.get("refresh_token", refresh_token)
     expires_at = int(time.time()) + r.get("expires_in", 86400)
 
+    # Сохраняем новые токены в БД
     save_tokens(
         owner_type="agency",
         client_id=AGENCY_ID,
@@ -154,12 +158,26 @@ def refresh_agency_token(refresh_token):
 
 
 def get_agency_token():
-    access, refresh, expires_at = get_tokens("agency", os.getenv("AGENCY_ID"))
+    """
+    Возвращает действующий токен агентства.
+    Если токен истёк, обновляет его и сохраняет в БД.
+    """
+    access, refresh, expires_at = get_tokens("agency", AGENCY_ID)
+
+    # Если токена нет, пытаемся создать новый через refresh
     if not access:
         if refresh:
-            refresh_agency_token(refresh)
-            pass
-        raise Exception("Нет агентских токенов в БД")
+            access = refresh_agency_token(refresh)
+        else:
+            raise Exception("❌ Нет агентских токенов в БД и refresh_token отсутствует")
+        return access
+
+    # Проверяем истечение
+    if expires_at is None or expires_at < time.time():
+        if refresh:
+            access = refresh_agency_token(refresh)
+        else:
+            print(f"⚠️ Агентский токен истёк, но refresh_token отсутствует")
     return access
 
 
@@ -168,7 +186,11 @@ def get_agency_token():
 # ============================================================
 
 def get_clients():
-    token = get_agency_token()
+    """
+    Получает список клиентов агентства с помощью действующего токена.
+    Не обновляет токен дважды.
+    """
+    token = get_agency_token()  # получаем уже свежий токен
 
     url = f"{BASE_URL}/agency/clients.json"
     headers = {"Authorization": f"Bearer {token}", "client_id": AGENCY_ID}
@@ -176,32 +198,30 @@ def get_clients():
     r = requests.get(url, headers=headers)
 
     if r.status_code in (401, 403):
-        refresh_agency_token(get_tokens("agency", AGENCY_ID)[1])
-        r = requests.get(url, headers=headers)
+        raise Exception("❌ Агентский токен неверен или заблокирован при запросе клиентов")
 
     data = r.json()
 
-    # Добавляем клиентов в таблицу tokens
-    client = db()
+    # Добавляем клиентов в таблицу tokens, если их там нет
+    client_ch = db()
     for c in data.get("items", []):
         client_id = str(c["user"]["account"]["id"])
 
-        # Проверяем, есть ли запись
-        exists = client.execute(f"""
+        exists = client_ch.execute(f"""
             SELECT count() 
             FROM tokens 
             WHERE owner_type='client' AND client_id='{client_id}'
         """)[0][0]
 
         if exists == 0:
-            client.execute(f"""
+            client_ch.execute(f"""
                 INSERT INTO tokens (
                      client_id, owner_type, access_token, refresh_token, expires_at, _version
                 ) VALUES (
-                    'client', '{client_id}', '', '', 0, {int(time.time())}
+                    '{client_id}', 'client', '', '', 0, {int(time.time())}
                 )
             """)
-    print(data)
+
     return data
 
 
@@ -291,7 +311,6 @@ def get_new_client_token(client_id):
 def refresh_client_token(client_id):
     """
     Обновляет токен клиента по client_id и сохраняет новые токены в ClickHouse.
-    Использует только refresh_token, client_secret не нужен.
     """
     # Получаем текущий refresh_token из БД
     access, refresh, expires_at = get_tokens("client", client_id)
@@ -304,7 +323,7 @@ def refresh_client_token(client_id):
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh,
-        "client_id": os.getenv("AGENCY_ID"),
+        "client_id": AGENCY_ID,
         "client_secret": AGENCY_SECRET
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -350,4 +369,4 @@ def get_all_tokens():
 
     return tokens
 
-get_clients()
+
